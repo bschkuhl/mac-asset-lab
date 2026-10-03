@@ -1,0 +1,29 @@
+{
+  "framing": "Soft even studio lighting, no cast shadows, plain light gray background, single subject centered, whole body visible with margin around it, no text, no props, no ground plane.",
+  "poses": {
+    "tpose": "Character turnaround reference sheet, front view, strict T-pose: both arms stretched perfectly horizontal straight out to the sides at shoulder height like the letter T, elbows straight, palms down, fingers spread apart, legs straight and a little apart, facing the camera. Nothing overlaps the body: a tail, if any, sticks out sideways, fully visible and clear of the legs.",
+    "humanoid": "Character turnaround reference sheet, front view, strict T-pose: both arms stretched perfectly horizontal straight out to the sides at shoulder height like the letter T, elbows straight, palms down, fingers spread apart, legs straight and a little apart, facing the camera, a person built like a small human.",
+    "quadruped": "Character reference, side view from the left, standing neutral on all four straight legs, legs a little apart so none overlap, head up turned slightly toward the camera, tail stretched straight out behind, fully visible and clear of the body and legs.",
+    "hexapod": "Character reference, side view from the left, standing on all six legs, the legs spread apart so none overlap, head and antennae up, the whole body fully visible.",
+    "wings": "Front view, standing upright on its feet facing the camera, both wings spread wide open to the sides like a T-pose, every wing feather visible, tail feathers pointing down.",
+    "spread": "Three-quarter front view from slightly above, standing with all legs spread wide so none overlap, claws raised and open, the whole body fully visible.",
+    "flippers": "Three-quarter front view from slightly above, all four flippers stretched out flat to the sides, head forward, the whole body fully visible.",
+    "object": "Three-quarter front view, the whole object visible, standing on its base."
+  },
+  "pose_hold": {
+    "tpose": "Same strict T-pose: arms stretched horizontally out to the sides, legs straight.",
+    "humanoid": "Same strict T-pose: arms stretched horizontally out to the sides, legs straight, built like a small human.",
+    "quadruped": "Standing on all four paws like a real four-legged animal, never upright on the hind legs.",
+    "hexapod": "Standing on all six legs like a real insect, legs spread apart, antennae up.",
+    "wings": "Standing upright with both wings spread wide open to the sides.",
+    "spread": "Standing with all legs spread wide, claws raised and open.",
+    "flippers": "All four flippers stretched out flat to the sides.",
+    "object": ""
+  },
+  "views": {
+    "front": "seen straight from the front, facing the camera head-on",
+    "left": "seen exactly from the side in profile, the character faces to the left edge of the image, its left side toward the camera",
+    "back": "seen straight from behind, its back toward the camera, the face not visible",
+    "right": "seen exactly from the side in profile, the character faces to the right edge of the image, its right side toward the camera"
+  }
+}
