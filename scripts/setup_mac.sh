@@ -37,7 +37,7 @@ Done. Next:
   hf auth login                      (once; some model repos need accepted licenses)
   scripts/download_models.sh klein9b (about 27 GB; 'dev' = about 60 GB, see docs/PIPELINES.md)
   scripts/comfy_up.sh                (start ComfyUI in the background)
-  scripts/doctor.sh                  (check everything)
+  ./pipeline.py doctor               (check everything)
 Tip for big models: macOS lets the GPU use about 75 % of RAM. To allow about 56 GB until the next reboot:
   sudo sysctl iogpu.wired_limit_mb=57344
 MSG

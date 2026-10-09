@@ -5,13 +5,15 @@
     ./pipeline.py concept <name> "<subject>" [--style character] [--pose tpose] [--engine klein9b] [--count 4]
     ./pipeline.py edit    <name> <image.png> "<instruction>" [--count 2]
     ./pipeline.py views   <name> <image.png> [--only front back]
-    ./pipeline.py model3d <name> <image.png> [--pipeline-type 512|1024|1024_cascade] [--texture-size 1024]
+    ./pipeline.py model3d <name> <image.png> [--engine3d pixal3d|trellis] [--faces 3000] [--texture-size 2048]
     ./pipeline.py blender <name>              # GLB -> out/<name>/blender/<name>.blend
-    ./pipeline.py build   <name> <image.png>  # views (optional) -> model3d -> blender in one go
+    ./pipeline.py lowpoly <name> [--faces N] [--size 2048]  # .blend -> <name>_lowpoly.blend + .glb (colors baked)
+    ./pipeline.py preview <name> [--high]     # (low-poly) .blend -> out/<name>/preview/preview_<view>.png (5 renders)
+    ./pipeline.py build   <name> <image.png>  # views (optional) -> model3d -> blender -> lowpoly -> preview
     ./pipeline.py bench                       # same prompts on every engine, writes out/bench.md
     ./pipeline.py doctor                      # checks the install
 
-Everything is written to out/<name>/ (concepts, views/, model/, blender/). The layout matches the game repo's
+Everything is written to out/<name>/ (concepts, views/, model/, blender/, preview/). The layout matches the game repo's
 assets/concepts/<name>/, so scripts/export_to_game.sh can copy it over.
 The style is chosen up front with --style (files in styles/*.json; add your own, the file name is the style name).
 """
@@ -274,30 +276,105 @@ def cmd_views(a):
 
 # ---------------------------------------------------------------- 3D (TRELLIS.2 for Apple Silicon) and Blender
 
-def cmd_model3d(a):
-    name = slug(a.name)
+def mesh_faces(a):
+    """Target triangles and where they come from: --faces, else the "faces" of the image's style (from its .json),
+    else TRELLIS' own 200 000."""
+    if a.faces:
+        return a.faces, "--faces"
+    mp = os.path.splitext(a.image)[0] + ".json"
+    try:
+        with open(mp) as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        meta = {}
+    style = meta.get("style") if isinstance(meta, dict) else None
+    faces = styles().get(style, {}).get("faces")
+    if faces:
+        return int(faces), f"style {style}"
+    return 200000, "default"
+
+
+def positive_int(v):
+    n = int(v)
+    if n <= 0:
+        raise argparse.ArgumentTypeError("must be > 0")
+    return n
+
+
+ENGINES3D = ("pixal3d", "trellis")
+
+
+def run_trellis(a, out_dir, name, faces):
     t = os.path.join(VENDOR, "trellis-mac")
     py = os.path.join(t, ".venv", "bin", "python")
     if not os.path.exists(py):
         sys.exit("TRELLIS not installed: scripts/setup_trellis.sh")
-    out_dir = os.path.join(OUT, name, "model")
-    os.makedirs(out_dir, exist_ok=True)
     stem = f"{name}_trellis"
     cmd = [py, os.path.join(t, "generate.py"), os.path.abspath(a.image), "--seed", str(a.seed),
            "--output", stem, "--pipeline-type", a.pipeline_type, "--texture-size", str(a.texture_size)]
-    print(" ".join(cmd))
-    t0 = time.time()
-    subprocess.run(cmd, cwd=t, check=True)
+    print(f"TRELLIS_FACES={faces} " + " ".join(cmd))
+    subprocess.run(cmd, cwd=t, check=True, env={**os.environ, "TRELLIS_FACES": str(faces)})
     found = [p for p in (os.path.join(t, stem + ".glb"), os.path.join(t, stem, stem + ".glb"),
                          *glob.glob(os.path.join(t, "**", stem + ".glb"), recursive=True)) if os.path.exists(p)]
     if not found:
         sys.exit(f"TRELLIS finished but {stem}.glb was not found under {t}; check its output folder")
     dest = os.path.join(out_dir, stem + ".glb")
     shutil.copy(found[0], dest)
+    return dest
+
+
+def run_pixal3d(a, out_dir, name):
+    t = os.path.join(VENDOR, "pixal3d-mac")
+    py = os.path.join(t, ".venv", "bin", "python")
+    if not os.path.exists(py):
+        sys.exit("Pixal3D not installed: scripts/setup_pixal3d.sh")
+    dest = os.path.join(out_dir, f"{name}_pixal3d.glb")
+    # its own decimation breaks thin parts at low counts, so it stays detailed and `lowpoly` reduces afterwards
+    cmd = [py, "generate_mps.py", os.path.abspath(a.image), "--output", dest, "--seed", str(a.seed),
+           "--native-decimation-target", CFG["PIXAL3D_FACES"], "--texture-size", str(a.texture_size)]
+    print(" ".join(cmd))
+    subprocess.run(cmd, cwd=t, check=True, env={**os.environ, "O_VOXEL_PYTHON": py})
+    return dest
+
+
+LOWPOLY_DEFAULT = 10000  # low-poly target for pixal3d when neither --faces nor the style sets one
+
+
+def cmd_model3d(a):
+    name = slug(a.name)
+    faces, source = mesh_faces(a)
+    if a.engine3d == "pixal3d" and source == "default":
+        faces, source = LOWPOLY_DEFAULT, "pixal3d default"
+    print(f"target {faces} triangles ({source})" + (f", generated at {CFG['PIXAL3D_FACES']} first"
+                                                     if a.engine3d == "pixal3d" else ""))
+    out_dir = os.path.join(OUT, name, "model")
+    os.makedirs(out_dir, exist_ok=True)
+    t0 = time.time()
+    if a.engine3d == "pixal3d":
+        dest = run_pixal3d(a, out_dir, name)
+    else:
+        dest = run_trellis(a, out_dir, name, faces)
     with open(dest[:-4] + ".json", "w") as f:
-        json.dump(dict(image=os.path.basename(a.image), seed=a.seed, pipeline_type=a.pipeline_type,
-                       texture_size=a.texture_size, seconds=round(time.time() - t0)), f, indent=2)
+        meta = dict(image=os.path.basename(a.image), engine3d=a.engine3d, seed=a.seed, texture_size=a.texture_size,
+                    faces=faces, seconds=round(time.time() - t0))
+        if a.engine3d == "trellis":  # Pixal3D always runs its 1024 cascade
+            meta["pipeline_type"] = a.pipeline_type
+        json.dump(meta, f, indent=2)
     print(f"{rel(dest)}  ({time.time() - t0:.0f} s)")
+
+
+def latest_model(name):
+    """Newest generated GLB of <name> (not the low-poly export) and its .json metadata."""
+    glbs = [p for p in glob.glob(os.path.join(OUT, name, "model", "*.glb")) if not p.endswith("_lowpoly.glb")]
+    if not glbs:
+        sys.exit(f"no model in {rel(os.path.join(OUT, name, 'model'))}; run model3d first")
+    glb = max(glbs, key=os.path.getmtime)
+    try:
+        with open(glb[:-4] + ".json") as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        meta = {}
+    return glb, meta if isinstance(meta, dict) else {}
 
 
 def blender_exe():
@@ -309,13 +386,43 @@ def blender_exe():
 
 def cmd_blender(a):
     name = slug(a.name)
-    glb = os.path.join(OUT, name, "model", f"{name}_trellis.glb")
-    if not os.path.exists(glb):
-        sys.exit(f"missing {rel(glb)}; run model3d first")
+    glb, meta = latest_model(name)
     dest = os.path.join(OUT, name, "blender", f"{name}.blend")
     os.makedirs(os.path.dirname(dest), exist_ok=True)
+    for old in (dest[:-6] + "_lowpoly.blend", os.path.join(OUT, name, "model", f"{name}_lowpoly.glb")):
+        if os.path.exists(old):  # belongs to the previous model; preview/export would pick it up
+            os.remove(old)
+    rotate = ["--rotate-z", "180"] if meta.get("engine3d") == "pixal3d" else []  # Pixal3D models face +Y
     subprocess.run([blender_exe(), "-b", "--factory-startup", "--python", os.path.join(LAB, "blender", "import_glb.py"),
-                    "--", glb, dest, "--name", name], check=True)
+                    "--", glb, dest, "--name", name, *rotate], check=True)
+    print(rel(dest))
+
+
+def cmd_lowpoly(a):
+    name = slug(a.name)
+    blend = os.path.join(OUT, name, "blender", f"{name}.blend")
+    if not os.path.exists(blend):
+        sys.exit(f"missing {rel(blend)}; run ./pipeline.py blender {name} first")
+    faces = a.faces or int(latest_model(name)[1].get("faces", 3000))
+    dst_blend = os.path.join(OUT, name, "blender", f"{name}_lowpoly.blend")
+    dst_glb = os.path.join(OUT, name, "model", f"{name}_lowpoly.glb")
+    subprocess.run([blender_exe(), "-b", blend, "--factory-startup", "--python",
+                    os.path.join(LAB, "blender", "lowpoly.py"), "--", dst_blend, dst_glb, "--faces", str(faces),
+                    "--size", str(a.size)], check=True)
+    print(rel(dst_glb))
+
+
+def cmd_preview(a):
+    name = slug(a.name)
+    blend = os.path.join(OUT, name, "blender", f"{name}.blend")
+    low = blend[:-6] + "_lowpoly.blend"
+    if not getattr(a, "high", False) and os.path.exists(low):
+        blend = low
+    if not os.path.exists(blend):
+        sys.exit(f"missing {rel(blend)}; run ./pipeline.py blender {name} first")
+    dest = os.path.join(OUT, name, "preview")
+    subprocess.run([blender_exe(), "-b", blend, "--factory-startup", "--python",
+                    os.path.join(LAB, "blender", "render_preview.py"), "--", dest], check=True)
     print(rel(dest))
 
 
@@ -325,8 +432,11 @@ def cmd_build(a):
         cmd_views(argparse.Namespace(name=name, image=a.image, seed=a.seed, only=None, pose=None, note=None,
                                      engine=a.engine, size=1024))
     cmd_model3d(argparse.Namespace(name=name, image=a.image, seed=a.seed or 42, pipeline_type=a.pipeline_type,
-                                   texture_size=a.texture_size))
+                                   texture_size=a.texture_size, faces=a.faces, engine3d=a.engine3d))
     cmd_blender(argparse.Namespace(name=name))
+    if a.engine3d == "pixal3d":  # TRELLIS already reduces to the target itself
+        cmd_lowpoly(argparse.Namespace(name=name, faces=a.faces, size=2048))
+    cmd_preview(argparse.Namespace(name=name, high=False))
 
 
 # ---------------------------------------------------------------- bench and doctor
@@ -383,6 +493,8 @@ def cmd_doctor(_a):
         check("ComfyUI running", False, "scripts/comfy_up.sh")
     check("TRELLIS.2 installed", os.path.exists(os.path.join(VENDOR, "trellis-mac", ".venv", "bin", "python")),
           "scripts/setup_trellis.sh (optional)")
+    check("Pixal3D installed", os.path.exists(os.path.join(VENDOR, "pixal3d-mac", ".venv", "bin", "python")),
+          "scripts/setup_pixal3d.sh")
     try:
         blender_exe()
         check("Blender found", True)
@@ -428,24 +540,36 @@ def main():
     m.add_argument("name")
     m.add_argument("image")
     m.add_argument("--pipeline-type", default="1024", choices=["512", "1024", "1024_cascade"])
-    m.add_argument("--texture-size", type=int, default=1024, choices=[512, 1024, 2048])
+    m.add_argument("--texture-size", type=int, default=2048, choices=[512, 1024, 2048])
     m.add_argument("--seed", type=int, default=42)
+    m.add_argument("--faces", type=positive_int, help="target triangles (default: the style's \"faces\", else 200000)")
+    m.add_argument("--engine3d", default=CFG.get("DEFAULT_ENGINE3D", "pixal3d"), choices=ENGINES3D)
     b = sub.add_parser("blender")
     b.add_argument("name")
+    lp = sub.add_parser("lowpoly")
+    lp.add_argument("name")
+    lp.add_argument("--faces", type=positive_int, help="target triangles (default: from the model's .json)")
+    lp.add_argument("--size", type=int, default=2048, choices=[256, 512, 1024, 2048])
+    pv = sub.add_parser("preview")
+    pv.add_argument("name")
+    pv.add_argument("--high", action="store_true", help="render the detailed model, not the low-poly one")
     bu = sub.add_parser("build")
     bu.add_argument("name")
     bu.add_argument("image")
     bu.add_argument("--views", action="store_true", help="also render the 4 views first (for review)")
     bu.add_argument("--engine", default="klein9b", choices=engines())
     bu.add_argument("--pipeline-type", default="1024", choices=["512", "1024", "1024_cascade"])
-    bu.add_argument("--texture-size", type=int, default=1024, choices=[512, 1024, 2048])
+    bu.add_argument("--texture-size", type=int, default=2048, choices=[512, 1024, 2048])
     bu.add_argument("--seed", type=int)
+    bu.add_argument("--faces", type=positive_int, help="target triangles (default: the style's \"faces\", else 200000)")
+    bu.add_argument("--engine3d", default=CFG.get("DEFAULT_ENGINE3D", "pixal3d"), choices=ENGINES3D)
     be = sub.add_parser("bench")
     be.add_argument("--engines", nargs="+", default=["klein9b", "dev", "dev_turbo"], choices=engines())
     sub.add_parser("doctor")
     a = p.parse_args()
     {"styles": cmd_styles, "concept": cmd_concept, "edit": cmd_edit, "views": cmd_views, "model3d": cmd_model3d,
-     "blender": cmd_blender, "build": cmd_build, "bench": cmd_bench, "doctor": cmd_doctor}[a.cmd](a)
+     "blender": cmd_blender, "lowpoly": cmd_lowpoly, "preview": cmd_preview, "build": cmd_build, "bench": cmd_bench,
+     "doctor": cmd_doctor}[a.cmd](a)
 
 
 if __name__ == "__main__":

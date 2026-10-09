@@ -1,0 +1,6 @@
+{
+  "name": "psx",
+  "description": "Real low-poly PSX/N64-era model (1996-98): a few hundred large flat faces, chunky shapes, flat color areas.",
+  "prompt": "Very low poly 3D game model from a 1997 PlayStation / Nintendo 64 game, only a few hundred polygons, large flat-shaded triangular faces with clearly visible hard edges, chunky simple geometric shapes, blocky solid silhouette, no thin or separate small parts (feathers, fingers and hair are merged into single solid slabs), flat solid color areas in vivid, highly saturated colors, no fine detail, no texture noise.",
+  "faces": 5000
+}

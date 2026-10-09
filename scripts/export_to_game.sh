@@ -7,9 +7,11 @@ name="${1:?name}"; game="${2:?path to game repo}"
 src="$LAB/out/$name"
 [ -d "$src" ] || { echo "no results: $src"; exit 1; }
 mkdir -p "$game/assets/concepts/$name" "$game/assets/glb"
-rsync -a --exclude 'model/' --exclude 'blender/' "$src/" "$game/assets/concepts/$name/"
-glb="$(ls "$src"/model/*.glb 2>/dev/null | head -1 || true)"
+rsync -a --exclude 'model/' --exclude 'blender/' --exclude 'preview/' "$src/" "$game/assets/concepts/$name/"
+# the low-poly export if there is one, else the newest generated model
+glb="$(ls "$src/model/${name}_lowpoly.glb" 2>/dev/null || ls -t "$src"/model/*.glb 2>/dev/null | head -1 || true)"
 if [ -n "$glb" ]; then
+  # the game repo's model_pipeline.py expects this name, whichever 3D engine made the model
   cp "$glb" "$game/assets/glb/${name}_trellis_download.glb"
   echo "next, in the game repo:"
   echo "  python3 assets/scripts/model_pipeline.py import $name assets/glb/${name}_trellis_download.glb --tag trellis"
